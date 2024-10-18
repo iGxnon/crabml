@@ -15,6 +15,9 @@ use crabml_llama2::llama2::Llama2Runner;
 use crabml_llama2::model::CpuLlamaModelLoader;
 use crabml_llama2::GpuLlamaModel;
 use crabml_llama2::Llama2Chat;
+use crabml_vulkan::vulkan_device::VulkanTensorDevice;
+use crabml_vulkan::vulkan_device::VulkanTensorDeviceOptions;
+use crabml_vulkan::vulkan_tensor::VulkanTensor;
 use crabml_wgpu::WgpuTensor;
 use crabml_wgpu::WgpuTensorDevice;
 use crabml_wgpu::WgpuTensorDeviceOptions;
@@ -65,6 +68,7 @@ struct CommandArgs {
 enum DeviceType {
     Cpu,
     Wgpu,
+    Vulkan,
 }
 
 impl std::fmt::Display for DeviceType {
@@ -72,6 +76,7 @@ impl std::fmt::Display for DeviceType {
         match self {
             DeviceType::Cpu => write!(f, "cpu"),
             DeviceType::Wgpu => write!(f, "wgpu"),
+            DeviceType::Vulkan => write!(f, "vulkan"),
         }
     }
 }
@@ -256,6 +261,15 @@ fn main() -> Result<()> {
             let model_wgpu = GpuLlamaModel::<WgpuTensor>::from_cpu(&model_cpu, device_wgpu)?;
 
             let mut runner = Llama2Runner::new(&model_wgpu, conf.seq_len, false)?;
+            run(&mut runner, &args)?;
+        }
+        DeviceType::Vulkan => {
+            let device_vulkan = VulkanTensorDevice::new(
+                VulkanTensorDeviceOptions::new().with_staging_buf_bytes(conf.vocab_size * 4),
+            );
+            let model_vulkan = GpuLlamaModel::<VulkanTensor>::from_cpu(&model_cpu, device_vulkan)?;
+
+            let mut runner = Llama2Runner::new(&model_vulkan, conf.seq_len, false)?;
             run(&mut runner, &args)?;
         }
     }

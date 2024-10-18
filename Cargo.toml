@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
-    "crabml-core",
-    "crabml-wgpu",
-    "crabml-vulkan",
-    "crabml-llama2",
     "crabml-cli",
+    "crabml-core",
+    "crabml-llama2",
+    "crabml-vulkan",
+    "crabml-wgpu",
 ]
 
 [profile.release]
