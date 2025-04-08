@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::vec;
 
 use crabml::bail;
+use crabml::cpu::CpuTensor;
 use crabml::error::ErrorKind;
 use crabml::error::Result;
 use crabml::gguf::GGMLType;
@@ -40,6 +41,64 @@ pub struct Llama2Runner<T: Tensor> {
     value_cache: Vec<Option<T>>, // (layer, n_kv_head, seq_len, kv_dim)
 
     pub metrics: TensorMetrics,
+}
+
+pub struct RawKVCacheRef<'a> {
+    pub key_cache: Vec<&'a [u8]>,
+    pub value_cache: Vec<&'a [u8]>,
+    pub seq_len: usize,
+}
+
+pub struct RawKVCache {
+    pub key_cache: Vec<Vec<u8>>,
+    pub value_cache: Vec<Vec<u8>>,
+    pub seq_len: usize,
+}
+
+impl Llama2Runner<CpuTensor<'_>> {
+    pub fn dump_kv_cache(&self) -> RawKVCacheRef<'_> {
+        let mut key_cache = Vec::new();
+        let mut value_cache = Vec::new();
+        for (k, v) in self.key_cache.iter().zip(self.value_cache.iter()) {
+            let k = k.as_ref().unwrap().as_bytes();
+            let v = v.as_ref().unwrap().as_bytes();
+            key_cache.push(k);
+            value_cache.push(v);
+        }
+        RawKVCacheRef {
+            key_cache,
+            value_cache,
+            seq_len: self.kv_cache_len(),
+        }
+    }
+
+    pub fn load_kv_cache(&mut self, kv_cache: RawKVCache) -> Result<()> {
+        self.reset_kv_cache(); // (n_kv_heads, 0, head_size)
+        let input_shape = &[
+            self.conf.n_kv_heads,
+            kv_cache.seq_len,
+            self.conf.head_size(),
+        ];
+        for (((k1, v1), k2), v2) in self
+            .key_cache
+            .iter_mut()
+            .zip(self.value_cache.iter_mut())
+            .zip(kv_cache.key_cache)
+            .zip(kv_cache.value_cache)
+        {
+            let k1 = k1.as_mut().unwrap();
+            k1.concatenate_other(
+                &CpuTensor::from_bytes(&k2, k1.typ(), input_shape, k1.device())?,
+                1,
+            )?;
+            let v1 = v1.as_mut().unwrap();
+            v1.concatenate_other(
+                &CpuTensor::from_bytes(&v2, v1.typ(), input_shape, v1.device())?,
+                1,
+            )?;
+        }
+        Ok(())
+    }
 }
 
 impl<T: Tensor> Llama2Runner<T> {
@@ -105,6 +164,14 @@ impl<T: Tensor> Llama2Runner<T> {
 
     pub fn kv_cache_len(&self) -> usize {
         self.key_cache[0].as_ref().unwrap().shape()[1]
+    }
+
+    // reset runner state
+    pub fn reset_kv_cache(&mut self) {
+        for (k, v) in self.key_cache.iter_mut().zip(self.value_cache.iter_mut()) {
+            *k = Some(k.take().unwrap().resize(1, 0).unwrap());
+            *v = Some(v.take().unwrap().resize(1, 0).unwrap());
+        }
     }
 
     // prefill the model with the prompt, return the next position and the first generated token

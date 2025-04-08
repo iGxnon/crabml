@@ -9,9 +9,9 @@ use crate::error::ErrorKind;
 use crate::error::Result;
 use crate::tensor::TensorStrider;
 
-pub fn concatenate_inplace<'a>(
-    buf1: &mut CpuTensorBuf<'a>,
-    buf2: &CpuTensorBuf<'a>,
+pub fn concatenate_inplace(
+    buf1: &mut CpuTensorBuf<'_>,
+    buf2: &CpuTensorBuf<'_>,
     strider1: &TensorStrider,
     strider2: &TensorStrider,
     axis: usize,

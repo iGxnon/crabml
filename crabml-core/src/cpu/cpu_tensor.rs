@@ -61,6 +61,54 @@ impl<'a> CpuTensor<'a> {
         })
     }
 
+    pub fn as_bytes(&'a self) -> &'a [u8] {
+        self.buf.as_bytes()
+    }
+
+    // fix lifetime issue
+    pub fn concatenate_other(&mut self, rhs: &CpuTensor<'_>, axis: usize) -> Result<()> {
+        let _t = self.device.metrics.concatenate_walltime.track();
+        // (2, 1) + (2, 1) at axis 0 -> (4, 1)
+        // (2, 1) + (2, 3) at axis 1 -> (2, 4)
+        if !self.is_owned() {
+            bail!(ErrorKind::TensorError, "tensor not owned on concatenate");
+        }
+        if self.dtype() != GGMLType::F32 && self.dtype() != GGMLType::F16 {
+            bail!(
+                ErrorKind::TensorError,
+                "only f32/f16 is supported on concatenate",
+            )
+        }
+        if rhs.dtype() != GGMLType::F32 && rhs.dtype() != GGMLType::F16 {
+            bail!(
+                ErrorKind::TensorError,
+                "only f32/f16 is supported on concatenate rhs",
+            );
+        }
+
+        // both tensors must have the same shape (except in the concatenating dimension)
+        for i in 0..self.shape().len() {
+            if i == axis {
+                continue;
+            }
+            if self.shape()[i] != rhs.shape()[i] {
+                bail!(
+                    ErrorKind::TensorError,
+                    "shape mismatch on concatenate, want {:?} but got {:?}",
+                    self.shape(),
+                    rhs.shape()
+                );
+            }
+        }
+
+        let strider1 = self.strider().clone();
+        let strider2 = rhs.strider();
+        let new_strider =
+            primitives::concatenate_inplace(self.buf_mut(), rhs.buf(), &strider1, strider2, axis)?;
+        self.strider = new_strider;
+        Ok(())
+    }
+
     pub fn dequantize(self, dtype: GGMLType) -> Result<Self> {
         let _t = self.device.metrics.dequantize_walltime.track();
         let strider = self.strider.clone();
